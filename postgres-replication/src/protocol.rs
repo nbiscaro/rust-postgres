@@ -1,8 +1,7 @@
 use std::cell::Cell;
-use std::io::{self, Read};
-use std::{cmp, str};
+use std::io;
+use std::str;
 
-use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Bytes;
 use memchr::memchr;
 use postgres_protocol::{Lsn, Oid};
@@ -59,9 +58,9 @@ impl ReplicationMessage<Bytes> {
 
         let replication_message = match tag {
             XLOG_DATA_TAG => {
-                let wal_start = buf.read_u64::<BigEndian>()?;
-                let wal_end = buf.read_u64::<BigEndian>()?;
-                let timestamp = buf.read_i64::<BigEndian>()?;
+                let wal_start = buf.read_u64_be()?;
+                let wal_end = buf.read_u64_be()?;
+                let timestamp = buf.read_i64_be()?;
                 let data = buf.read_all();
                 ReplicationMessage::XLogData(XLogDataBody {
                     wal_start,
@@ -71,8 +70,8 @@ impl ReplicationMessage<Bytes> {
                 })
             }
             PRIMARY_KEEPALIVE_TAG => {
-                let wal_end = buf.read_u64::<BigEndian>()?;
-                let timestamp = buf.read_i64::<BigEndian>()?;
+                let wal_end = buf.read_u64_be()?;
+                let timestamp = buf.read_i64_be()?;
                 let reply = buf.read_u8()?;
                 ReplicationMessage::PrimaryKeepAlive(PrimaryKeepAliveBody {
                     wal_end,
@@ -213,27 +212,27 @@ impl LogicalReplicationMessage {
 
         let logical_replication_message = match tag {
             BEGIN_TAG => Self::Begin(BeginBody {
-                final_lsn: buf.read_u64::<BigEndian>()?,
-                timestamp: buf.read_i64::<BigEndian>()?,
-                xid: buf.read_u32::<BigEndian>()?,
+                final_lsn: buf.read_u64_be()?,
+                timestamp: buf.read_i64_be()?,
+                xid: buf.read_u32_be()?,
             }),
             COMMIT_TAG => Self::Commit(CommitBody {
                 flags: buf.read_i8()?,
-                commit_lsn: buf.read_u64::<BigEndian>()?,
-                end_lsn: buf.read_u64::<BigEndian>()?,
-                timestamp: buf.read_i64::<BigEndian>()?,
+                commit_lsn: buf.read_u64_be()?,
+                end_lsn: buf.read_u64_be()?,
+                timestamp: buf.read_i64_be()?,
             }),
             ORIGIN_TAG => Self::Origin(OriginBody {
-                commit_lsn: buf.read_u64::<BigEndian>()?,
+                commit_lsn: buf.read_u64_be()?,
                 name: buf.read_cstr()?,
             }),
             RELATION_TAG => {
                 let xid = if in_streamed_transaction.get() {
-                    Some(buf.read_u32::<BigEndian>()?)
+                    Some(buf.read_u32_be()?)
                 } else {
                     None
                 };
-                let rel_id = buf.read_u32::<BigEndian>()?;
+                let rel_id = buf.read_u32_be()?;
                 let namespace = buf.read_cstr()?;
                 let name = buf.read_cstr()?;
                 let replica_identity = match buf.read_u8()? {
@@ -248,7 +247,7 @@ impl LogicalReplicationMessage {
                         ));
                     }
                 };
-                let column_len = buf.read_i16::<BigEndian>()?;
+                let column_len = buf.read_i16_be()?;
 
                 let mut columns = Vec::with_capacity(column_len as usize);
                 for _ in 0..column_len {
@@ -266,21 +265,21 @@ impl LogicalReplicationMessage {
             }
             TYPE_TAG => Self::Type(TypeBody {
                 xid: if in_streamed_transaction.get() {
-                    Some(buf.read_u32::<BigEndian>()?)
+                    Some(buf.read_u32_be()?)
                 } else {
                     None
                 },
-                id: buf.read_u32::<BigEndian>()?,
+                id: buf.read_u32_be()?,
                 namespace: buf.read_cstr()?,
                 name: buf.read_cstr()?,
             }),
             INSERT_TAG => {
                 let xid = if in_streamed_transaction.get() {
-                    Some(buf.read_u32::<BigEndian>()?)
+                    Some(buf.read_u32_be()?)
                 } else {
                     None
                 };
-                let rel_id = buf.read_u32::<BigEndian>()?;
+                let rel_id = buf.read_u32_be()?;
                 let tag = buf.read_u8()?;
 
                 let tuple = match tag {
@@ -297,11 +296,11 @@ impl LogicalReplicationMessage {
             }
             UPDATE_TAG => {
                 let xid = if in_streamed_transaction.get() {
-                    Some(buf.read_u32::<BigEndian>()?)
+                    Some(buf.read_u32_be()?)
                 } else {
                     None
                 };
-                let rel_id = buf.read_u32::<BigEndian>()?;
+                let rel_id = buf.read_u32_be()?;
                 let tag = buf.read_u8()?;
 
                 let mut key_tuple = None;
@@ -344,11 +343,11 @@ impl LogicalReplicationMessage {
             }
             DELETE_TAG => {
                 let xid = if in_streamed_transaction.get() {
-                    Some(buf.read_u32::<BigEndian>()?)
+                    Some(buf.read_u32_be()?)
                 } else {
                     None
                 };
-                let rel_id = buf.read_u32::<BigEndian>()?;
+                let rel_id = buf.read_u32_be()?;
                 let tag = buf.read_u8()?;
 
                 let mut key_tuple = None;
@@ -374,16 +373,16 @@ impl LogicalReplicationMessage {
             }
             TRUNCATE_TAG => {
                 let xid = if in_streamed_transaction.get() {
-                    Some(buf.read_u32::<BigEndian>()?)
+                    Some(buf.read_u32_be()?)
                 } else {
                     None
                 };
-                let relation_len = buf.read_i32::<BigEndian>()?;
+                let relation_len = buf.read_i32_be()?;
                 let options = buf.read_i8()?;
 
                 let mut rel_ids = Vec::with_capacity(relation_len as usize);
                 for _ in 0..relation_len {
-                    rel_ids.push(buf.read_u32::<BigEndian>()?);
+                    rel_ids.push(buf.read_u32_be()?);
                 }
 
                 Self::Truncate(TruncateBody {
@@ -396,7 +395,7 @@ impl LogicalReplicationMessage {
             STREAM_START_TAG if protocol_version >= 2 => {
                 in_streamed_transaction.set(true);
                 Self::StreamStart(StreamStartBody {
-                    xid: buf.read_u32::<BigEndian>()?,
+                    xid: buf.read_u32_be()?,
                     is_first_segment: buf.read_u8()?,
                 })
             }
@@ -407,18 +406,18 @@ impl LogicalReplicationMessage {
             STREAM_COMMIT_TAG if protocol_version >= 2 => {
                 in_streamed_transaction.set(false);
                 Self::StreamCommit(StreamCommitBody {
-                    xid: buf.read_u32::<BigEndian>()?,
+                    xid: buf.read_u32_be()?,
                     flags: buf.read_i8()?,
-                    commit_lsn: buf.read_u64::<BigEndian>()?,
-                    end_lsn: buf.read_u64::<BigEndian>()?,
-                    timestamp: buf.read_i64::<BigEndian>()?,
+                    commit_lsn: buf.read_u64_be()?,
+                    end_lsn: buf.read_u64_be()?,
+                    timestamp: buf.read_i64_be()?,
                 })
             }
             STREAM_ABORT_TAG if protocol_version >= 2 => {
                 in_streamed_transaction.set(false);
                 Self::StreamAbort(StreamAbortBody {
-                    xid: buf.read_u32::<BigEndian>()?,
-                    subxid: buf.read_u32::<BigEndian>()?,
+                    xid: buf.read_u32_be()?,
+                    subxid: buf.read_u32_be()?,
                 })
             }
             tag => {
@@ -447,7 +446,7 @@ impl Tuple {
 
 impl Tuple {
     fn parse(buf: &mut Buffer) -> io::Result<Self> {
-        let col_len = buf.read_i16::<BigEndian>()?;
+        let col_len = buf.read_i16_be()?;
         let mut tuple = Vec::with_capacity(col_len as usize);
         for _ in 0..col_len {
             tuple.push(TupleData::parse(buf)?);
@@ -498,8 +497,8 @@ impl Column {
         Ok(Self {
             flags: buf.read_i8()?,
             name: buf.read_cstr()?,
-            type_id: buf.read_i32::<BigEndian>()?,
-            type_modifier: buf.read_i32::<BigEndian>()?,
+            type_id: buf.read_i32_be()?,
+            type_modifier: buf.read_i32_be()?,
         })
     }
 }
@@ -523,10 +522,9 @@ impl TupleData {
             TUPLE_DATA_NULL_TAG => TupleData::Null,
             TUPLE_DATA_TOAST_TAG => TupleData::UnchangedToast,
             TUPLE_DATA_TEXT_TAG => {
-                let len = buf.read_i32::<BigEndian>()?;
-                let mut data = vec![0; len as usize];
-                buf.read_exact(&mut data)?;
-                TupleData::Text(data.into())
+                let len = buf.read_i32_be()?;
+                let data = buf.read_len(len as usize)?;
+                TupleData::Text(data)
             }
             tag => {
                 return Err(io::Error::new(
@@ -982,19 +980,117 @@ impl Buffer {
         self.idx = self.bytes.len();
         buf
     }
-}
 
-impl Read for Buffer {
     #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let len = {
-            let slice = self.slice();
-            let len = cmp::min(slice.len(), buf.len());
-            buf[..len].copy_from_slice(&slice[..len]);
-            len
-        };
-        self.idx += len;
-        Ok(len)
+    fn ensure(&self, need: usize) -> io::Result<()> {
+        if self.idx + need > self.bytes.len() {
+            Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected EOF",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[inline]
+    fn read_u8(&mut self) -> io::Result<u8> {
+        self.ensure(1)?;
+        let v = self.bytes[self.idx];
+        self.idx += 1;
+        Ok(v)
+    }
+
+    #[inline]
+    fn read_i8(&mut self) -> io::Result<i8> {
+        Ok(self.read_u8()? as i8)
+    }
+
+    #[inline]
+    fn read_i16_be(&mut self) -> io::Result<i16> {
+        self.ensure(2)?;
+        let start = self.idx;
+        self.idx += 2;
+        Ok(i16::from_be_bytes([
+            self.bytes[start],
+            self.bytes[start + 1],
+        ]))
+    }
+
+    #[inline]
+    fn read_i32_be(&mut self) -> io::Result<i32> {
+        self.ensure(4)?;
+        let start = self.idx;
+        self.idx += 4;
+        Ok(i32::from_be_bytes([
+            self.bytes[start],
+            self.bytes[start + 1],
+            self.bytes[start + 2],
+            self.bytes[start + 3],
+        ]))
+    }
+
+    #[inline]
+    fn read_u32_be(&mut self) -> io::Result<u32> {
+        self.ensure(4)?;
+        let start = self.idx;
+        self.idx += 4;
+        Ok(u32::from_be_bytes([
+            self.bytes[start],
+            self.bytes[start + 1],
+            self.bytes[start + 2],
+            self.bytes[start + 3],
+        ]))
+    }
+
+    #[inline]
+    fn read_i64_be(&mut self) -> io::Result<i64> {
+        self.ensure(8)?;
+        let start = self.idx;
+        self.idx += 8;
+        Ok(i64::from_be_bytes([
+            self.bytes[start],
+            self.bytes[start + 1],
+            self.bytes[start + 2],
+            self.bytes[start + 3],
+            self.bytes[start + 4],
+            self.bytes[start + 5],
+            self.bytes[start + 6],
+            self.bytes[start + 7],
+        ]))
+    }
+
+    #[inline]
+    fn read_u64_be(&mut self) -> io::Result<u64> {
+        self.ensure(8)?;
+        let start = self.idx;
+        self.idx += 8;
+        Ok(u64::from_be_bytes([
+            self.bytes[start],
+            self.bytes[start + 1],
+            self.bytes[start + 2],
+            self.bytes[start + 3],
+            self.bytes[start + 4],
+            self.bytes[start + 5],
+            self.bytes[start + 6],
+            self.bytes[start + 7],
+        ]))
+    }
+
+    #[inline]
+    fn read_len(&mut self, len: usize) -> io::Result<Bytes> {
+        let remaining = self.bytes.len().saturating_sub(self.idx);
+        if len > remaining {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected EOF",
+            ));
+        }
+        let start = self.idx;
+        let end = start + len;
+        let slice = self.bytes.slice(start..end);
+        self.idx = end;
+        Ok(slice)
     }
 }
 
